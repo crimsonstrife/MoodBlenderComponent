@@ -1,26 +1,33 @@
 #include "MoodBlenderComponent.h"
 
+#include "Channels/MovieSceneChannelProxy.h"
 #include "Components/SkyLightComponent.h"
 #include "Kismet/KismetMaterialLibrary.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "LevelSequence.h"
 #include "Materials/MaterialParameterCollection.h"
-#include "Materials/MaterialParameterCollectionInstance.h"
-#include "MovieScene3DTransformSection.h"
-#include "MovieScene3DTransformTrack.h"
-#include "MovieSceneChannelProxy.h"
-#include "MovieSceneColorSection.h"
-#include "MovieSceneColorTrack.h"
-#include "MovieSceneCommonHelpers.h"
-#include "MovieSceneFloatSection.h"
-#include "MovieSceneFloatTrack.h"
-#include "MovieSceneMaterialParameterCollectionTrack.h"
-#include "MovieSceneParameterSection.h"
-#include "MovieScenePropertyTrack.h"
-#include "TimerManager.h"
+#include "MovieScene/Public/MovieSceneCommonHelpers.h"
+
+#include "Sections/MovieScene3DTransformSection.h"
+#include "Sections/MovieSceneColorSection.h"
+#include "Sections/MovieSceneFloatSection.h"
+#include "Sections/MovieSceneParameterSection.h"
+
+#include "Tracks/MovieScene3DTransformTrack.h"
+#include "Tracks/MovieSceneColorTrack.h"
+#include "Tracks/MovieSceneFloatTrack.h"
+#include "Tracks/MovieSceneMaterialParameterCollectionTrack.h"
+#include "Tracks/MovieScenePropertyTrack.h"
 
 UMoodBlenderComponent::UMoodBlenderComponent(const FObjectInitializer& ObjectInitializer)
 	: Super(ObjectInitializer)
+	, ForceTime(0.0f)
+	, bResetTime(false)
+	, CurrentFrame(0.0f)
+	, MoodSequence(nullptr)
+	, bBlending(false)
+	, CurrentBlendTime(0.0f)
+	, BlendAlpha(0.0f)
 {
 	PrimaryComponentTick.bCanEverTick = true;
 	PrimaryComponentTick.bStartWithTickEnabled = false;
@@ -120,12 +127,12 @@ void UMoodBlenderComponent::CacheObjectTrack(UObject* Object, const FGuid& Objec
 
 	if (PropertyTracks.Num() > 0)
 	{
-		FCachedPropertyTrack NewEntry = FCachedPropertyTrack(Cast<AActor>(Object), Cast<USceneComponent>(Object), PropertyTracks);
+		const FCachedPropertyTrack NewEntry = FCachedPropertyTrack(Cast<AActor>(Object), Cast<USceneComponent>(Object), PropertyTracks);
 		ObjectTracks.Add(Object, NewEntry);
 	}
 }
 
-void UMoodBlenderComponent::GetPropertyTracks(const TWeakObjectPtr<UMovieScene>& MovieScene, const FGuid& ObjectGuid, TArray<TWeakObjectPtr<UMovieScenePropertyTrack>>& OutTracks)
+void UMoodBlenderComponent::GetPropertyTracks(const TWeakObjectPtr<UMovieScene>& MovieScene, const FGuid& ObjectGuid, TArray<TWeakObjectPtr<UMovieScenePropertyTrack>>& OutTracks) const
 {
 	for (const FMovieSceneBinding& Binding : MovieScene.Get()->GetBindings())
 	{
@@ -154,23 +161,6 @@ USceneComponent* UMoodBlenderComponent::GetComponentFromSequence(const TSubclass
 	}
 
 	return nullptr;
-}
-
-void UMoodBlenderComponent::Init()
-{
-	if (FirstRecaptureDelay > 0.0f)
-	{
-		FTimerHandle FirstRecaptureTimer;
-		GetOwner()->GetWorldTimerManager().SetTimer(FirstRecaptureTimer, this, &UMoodBlenderComponent::RecaptureSky, FirstRecaptureDelay, false, 0.0f);
-	}
-}
-
-void UMoodBlenderComponent::RecaptureSky()
-{
-	if (SkyLightComponent.IsValid())
-	{
-		SkyLightComponent.Get()->RecaptureSky();
-	}
 }
 
 void UMoodBlenderComponent::SetMood(const int32 NewTime, const bool bForce)
@@ -308,7 +298,7 @@ void UMoodBlenderComponent::CacheObject(UObject* Object, const FCachedPropertyTr
 
 		if (Track->GetClass() == UMovieSceneFloatTrack::StaticClass())
 		{
-			UFloatProperty* Property = FindField<UFloatProperty>(Object->GetClass(), Track->GetPropertyName());
+			FFloatProperty* Property = FindFProperty<FFloatProperty>(Object->GetClass(), Track->GetPropertyName());
 			const UMovieSceneFloatSection* Section = Cast<UMovieSceneFloatSection>(MovieSceneHelpers::FindSectionAtTime(Track->GetAllSections(), CurrentFrameNumber));
 			if (Property && Section)
 			{
@@ -324,7 +314,7 @@ void UMoodBlenderComponent::CacheObject(UObject* Object, const FCachedPropertyTr
 
 		if (Track->GetClass() == UMovieSceneColorTrack::StaticClass())
 		{
-			UStructProperty* Property = FindField<UStructProperty>(Object->GetClass(), Track->GetPropertyName());
+			FStructProperty* Property = FindFProperty<FStructProperty>(Object->GetClass(), Track->GetPropertyName());
 			const UMovieSceneColorSection* Section = Cast<UMovieSceneColorSection>(MovieSceneHelpers::FindSectionAtTime(Track->GetAllSections(), CurrentFrameNumber));
 			if (Property && Section)
 			{
@@ -347,10 +337,10 @@ void UMoodBlenderComponent::CacheObject(UObject* Object, const FCachedPropertyTr
 				{
 					const FLinearColor Value = FLinearColor
 					(
-						Cast<UFloatProperty>(ScriptStruct->FindPropertyByName("R"))->GetDefaultPropertyValue(),
-						Cast<UFloatProperty>(ScriptStruct->FindPropertyByName("G"))->GetDefaultPropertyValue(),
-						Cast<UFloatProperty>(ScriptStruct->FindPropertyByName("B"))->GetDefaultPropertyValue(),
-						Cast<UFloatProperty>(ScriptStruct->FindPropertyByName("A"))->GetDefaultPropertyValue()
+						CastField<FFloatProperty>(ScriptStruct->FindPropertyByName("R"))->GetDefaultPropertyValue(),
+						CastField<FFloatProperty>(ScriptStruct->FindPropertyByName("G"))->GetDefaultPropertyValue(),
+						CastField<FFloatProperty>(ScriptStruct->FindPropertyByName("B"))->GetDefaultPropertyValue(),
+						CastField<FFloatProperty>(ScriptStruct->FindPropertyByName("A"))->GetDefaultPropertyValue()
 					);
 					OldState.LinearColors.Add(Property, Value);
 
@@ -405,11 +395,6 @@ void UMoodBlenderComponent::UpdateMood()
 		}
 	}
 
-	if (bRecaptureSkyEveryFrame || BlendAlpha == 1.0f)
-	{
-		RecaptureSky();
-	}
-
 	if (BlendAlpha == 1.0f)
 	{
 		CurrentBlendTime = 0.0f;
@@ -430,7 +415,7 @@ void UMoodBlenderComponent::UpdateCollection(UMaterialParameterCollection* Colle
 
 	for (const TPair<FName, FLinearColor>& Pair : NewState.Colors)
 	{
-		UKismetMaterialLibrary::SetVectorParameterValue(World.Get(), Collection, Pair.Key, UKismetMathLibrary::LinearColorLerp(OldState.Colors[Pair.Key], Pair.Value, BlendAlpha));
+		UKismetMaterialLibrary::SetVectorParameterValue(World.Get(), Collection, Pair.Key, FMath::Lerp(OldState.Colors[Pair.Key], Pair.Value, BlendAlpha));
 	}
 }
 
@@ -452,20 +437,20 @@ void UMoodBlenderComponent::UpdateObject(UObject* Object, const FObjectMood& New
 		}
 	}
 
-	for (const TPair<UFloatProperty*, float>& Pair : NewState.Floats)
+	for (const TPair<FFloatProperty*, float>& Pair : NewState.Floats)
 	{
 		Pair.Key->SetPropertyValue_InContainer(Object, FMath::Lerp(OldState.Floats[Pair.Key], Pair.Value, BlendAlpha));
 	}
 
-	for (const TPair<UStructProperty*, FLinearColor>& Pair : NewState.Colors)
+	for (const TPair<FStructProperty*, FLinearColor>& Pair : NewState.Colors)
 	{
-		const FLinearColor CurrentLinearColor = UKismetMathLibrary::LinearColorLerp(OldState.Colors[Pair.Key], Pair.Value, BlendAlpha);
+		const FLinearColor CurrentLinearColor = FMath::Lerp(OldState.Colors[Pair.Key], Pair.Value, BlendAlpha);
 		*Pair.Key->ContainerPtrToValuePtr<FColor>(Object) = CurrentLinearColor.ToFColor(true);
 	}
 
-	for (const TPair<UStructProperty*, FLinearColor>& Pair : NewState.LinearColors)
+	for (const TPair<FStructProperty*, FLinearColor>& Pair : NewState.LinearColors)
 	{
-		const FLinearColor CurrentLinearColor = UKismetMathLibrary::LinearColorLerp(OldState.LinearColors[Pair.Key], Pair.Value, BlendAlpha);
+		const FLinearColor CurrentLinearColor = FMath::Lerp(OldState.LinearColors[Pair.Key], Pair.Value, BlendAlpha);
 		*Pair.Key->ContainerPtrToValuePtr<FLinearColor>(Object) = CurrentLinearColor;
 	}
 }

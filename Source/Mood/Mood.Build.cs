@@ -5,7 +5,7 @@ public class Mood : ModuleRules
     public Mood(ReadOnlyTargetRules Target) : base(Target)
     {
         PublicDependencyModuleNames.AddRange(
-            new string[]
+            new[]
             {
                 "Core",
                 "CoreUObject",
@@ -18,22 +18,11 @@ public class Mood : ModuleRules
         );
 
         PrivateDependencyModuleNames.AddRange(
-            new string[]
+            new[]
             {
                 "Slate",
                 "SlateCore",
             }
         );
-
-        DynamicallyLoadedModuleNames.AddRange(
-            new string[]
-            {
-                // ... add any modules that your module loads dynamically here ...
-			}
-        );
-
-        // faster compilation
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-        bFasterWithoutUnity = true;
     }
 }

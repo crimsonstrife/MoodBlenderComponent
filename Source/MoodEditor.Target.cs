@@ -1,5 +1,4 @@
 using UnrealBuildTool;
-using System.Collections.Generic;
 
 public class MoodEditorTarget : TargetRules
 {
@@ -7,5 +6,7 @@ public class MoodEditorTarget : TargetRules
     {
         Type = TargetType.Editor;
         ExtraModuleNames.Add("MoodEditor");
+
+        DefaultBuildSettings = BuildSettingsVersion.V2;
     }
 }

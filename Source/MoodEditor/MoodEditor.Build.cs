@@ -5,7 +5,7 @@ public class MoodEditor : ModuleRules
     public MoodEditor(ReadOnlyTargetRules Target) : base(Target)
     {
         PublicDependencyModuleNames.AddRange(
-            new string[]
+            new[]
             {
                 "Core",
                 "CoreUObject",
@@ -16,22 +16,12 @@ public class MoodEditor : ModuleRules
         );
 
         PrivateDependencyModuleNames.AddRange(
-            new string[]
+            new[]
             {
 				"Slate",
                 "SlateCore",
                 "UnrealEd"
             }
         );
-
-        PrivateIncludePathModuleNames.AddRange(
-            new string[]
-            {
-            }
-        );
-
-        // faster compilation
-        PCHUsage = ModuleRules.PCHUsageMode.UseExplicitOrSharedPCHs;
-        bFasterWithoutUnity = true;
     }
 }
